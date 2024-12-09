@@ -13,8 +13,6 @@ const images = ref([]);
 const selectedImageIndex = ref(null);
 const error = ref(null);
 const isDragging = ref(false);
-const sliderPosition = ref(50);
-const isSliderDragging = ref(false);
 
 let imageProcessor = null;
 
@@ -148,25 +146,6 @@ function handleDrop(e) {
   handleFiles(files);
 }
 
-function handleSliderMove(event) {
-  if (!isSliderDragging.value) return;
-
-  const container = event.currentTarget;
-  const rect = container.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
-
-  sliderPosition.value = percentage;
-}
-
-function handleSliderStart() {
-  isSliderDragging.value = true;
-}
-
-function handleSliderEnd() {
-  isSliderDragging.value = false;
-}
-
 // Delete a single image
 function deleteImage(index, event) {
   event.stopPropagation();
@@ -219,9 +198,15 @@ initializeWorker();
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <h1 class="text-4xl font-bold mb-2 text-center text-gray-900">AI 移除背景</h1>
-      <p class="text-center text-gray-600 mb-8">快速移除图片背景，支持批量处理</p>
+    <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+      <h1 class="text-4xl font-bold mb-2 text-center text-gray-900">AI 图片背景移除工具</h1>
+      <p class="text-center text-gray-600 mb-2">快速移除图片背景，支持批量处理</p>
+      <div class="flex justify-center text-sm text-gray-600 space-x-2 mb-8">
+        <p>✨ 完全免费，无需注册，无使用限制</p>
+        <p>🔒 全程本地处理，保护您的隐私安全</p>
+        <p>⚡️ 快速批量处理，支持所有常见图片格式</p>
+        <p>💫 AI 智能处理，效果清晰自然</p>
+      </div>
 
       <div v-if="error" class="mb-6 mx-auto max-w-md">
         <div class="bg-red-50 border-l-4 border-red-400 p-4">
@@ -296,17 +281,16 @@ initializeWorker();
               </div>
             </div>
             <div class="divide-y divide-gray-200 max-h-[500px] overflow-y-auto">
-              <div 
-                v-for="(image, index) in images" 
-                :key="index" 
-                @click="!isModelLoading && (selectedImageIndex = index)" 
-                class="p-4 hover:bg-gray-50" 
-                :class="{ 
+              <div
+                v-for="(image, index) in images"
+                :key="index"
+                @click="!isModelLoading && (selectedImageIndex = index)"
+                class="p-4 hover:bg-gray-50"
+                :class="{
                   'cursor-pointer': !isModelLoading,
                   'cursor-not-allowed': isModelLoading,
-                  'bg-blue-50': selectedImageIndex === index 
-                }"
-              >
+                  'bg-blue-50': selectedImageIndex === index,
+                }">
                 <div class="flex items-center justify-between">
                   <div class="min-w-0 flex-1">
                     <div class="flex justify-between items-center">
@@ -329,7 +313,7 @@ initializeWorker();
                       </span>
                       <span v-else class="inline-flex items-center text-green-600">
                         <svg class="-ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                         </svg>
                         处理完成
                       </span>
