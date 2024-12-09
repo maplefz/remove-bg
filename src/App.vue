@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { env } from "@huggingface/transformers";
 import { ImgComparisonSlider } from "@img-comparison-slider/vue";
+import JSZip from 'jszip';
 
 env.allowLocalModels = false;
 env.backends.onnx.wasm.proxy = true;
@@ -172,15 +173,25 @@ async function exportAllProcessed() {
     return;
   }
 
+  const zip = new JSZip();
+
+  // Add all processed images to the zip
   for (const img of processedImages) {
-    const link = document.createElement("a");
-    link.href = img.processed;
-    link.download = `processed_${img.name}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between downloads
+    // Convert base64 to blob
+    const response = await fetch(img.processed);
+    const blob = await response.blob();
+    zip.file(`processed_${img.name}`, blob);
   }
+
+  // Generate and download the zip file
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(zipBlob);
+  link.download = `processed_images_${new Date().getTime()}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
 }
 
 // Utility function to format file size
@@ -313,7 +324,7 @@ initializeWorker();
                       </span>
                       <span v-else class="inline-flex items-center text-green-600">
                         <svg class="-ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                         </svg>
                         处理完成
                       </span>
