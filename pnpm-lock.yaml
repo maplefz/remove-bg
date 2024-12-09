@@ -11,6 +11,9 @@ importers:
       '@huggingface/transformers':
         specifier: ^3.1.2
         version: 3.1.2
+      '@img-comparison-slider/vue':
+        specifier: ^8.0.0
+        version: 8.0.0
       vite-plugin-windicss:
         specifier: ^1.9.4
         version: 1.9.4(vite@6.0.3(@types/node@22.10.1)(jiti@1.21.6))
@@ -203,6 +206,9 @@ packages:
 
   '@huggingface/transformers@3.1.2':
     resolution: {integrity: sha512-+YKHashFDkZbjqTKPyhfRHiIxe1fl5/KqOr3zIHzXmUKhDSH4pwQ2Q58iXT5CUL6iSaZd93x+ep4VmvW6dLAlw==}
+
+  '@img-comparison-slider/vue@8.0.0':
+    resolution: {integrity: sha512-1gir2JlS8ZQLK2lzk4gIp6fuNvOR8UFXaPiHnBrF6fEwIXdMiI5veobi479FV6Tekj8CIhK+pLUPs+NvcOHd5g==}
 
   '@img/sharp-darwin-arm64@0.33.5':
     resolution: {integrity: sha512-UT4p+iz/2H4twwAoLCqfA9UH5pI6DggwKEGuaPy7nCVQ8ZsiY5PIcrRvD1DzuY3qYL07NtIQcWnBSY/heikIFQ==}
@@ -650,6 +656,9 @@ packages:
   guid-typescript@1.0.9:
     resolution: {integrity: sha512-Y8T4vYhEfwJOTbouREvG+3XDsjr8E3kIr7uf+JZ0BYloFsttiHU0WfvANVsR7TxNUJa/WpCnw/Ino/p+DeBhBQ==}
 
+  img-comparison-slider@8.0.6:
+    resolution: {integrity: sha512-ej4de7mWyjcXZvDgHq8K2a/dG8Vv+qYTdUjZa3cVILf316rLtDrHyGbh9fPvixmAFgbs30zTLfmaRDa7abjtzw==}
+
   is-arrayish@0.3.2:
     resolution: {integrity: sha512-eVRqCvVlZbuw3GrM63ovNSNAeA1K16kaR/LRY/92w0zxQ5/1YzwblUX652i4Xs9RwAGjW9d9y6X88t8OaAJfWQ==}
 
@@ -1020,6 +1029,10 @@ snapshots:
       onnxruntime-node: 1.20.1
       onnxruntime-web: 1.21.0-dev.20241205-d27fecd3d3
       sharp: 0.33.5
+
+  '@img-comparison-slider/vue@8.0.0':
+    dependencies:
+      img-comparison-slider: 8.0.6
 
   '@img/sharp-darwin-arm64@0.33.5':
     optionalDependencies:
@@ -1420,6 +1433,8 @@ snapshots:
       path-scurry: 1.11.1
 
   guid-typescript@1.0.9: {}
+
+  img-comparison-slider@8.0.6: {}
 
   is-arrayish@0.3.2: {}
 

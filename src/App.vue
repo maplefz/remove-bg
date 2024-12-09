@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue";
-import { AutoModel, AutoProcessor, env, RawImage } from "@huggingface/transformers";
+import { env } from "@huggingface/transformers";
+import { ImgComparisonSlider } from "@img-comparison-slider/vue";
 
 env.allowLocalModels = false;
 env.backends.onnx.wasm.proxy = true;
@@ -8,70 +9,84 @@ env.backends.onnx.wasm.proxy = true;
 const isLoading = ref(false);
 const isModelLoading = ref(true);
 const status = ref("初始化中...");
-const images = ref([]); // Store multiple images
-const selectedImageIndex = ref(null); // Track selected image
+const images = ref([]);
+const selectedImageIndex = ref(null);
 const error = ref(null);
+const isDragging = ref(false);
+const sliderPosition = ref(50);
+const isSliderDragging = ref(false);
 
-let model = null;
-let processor = null;
+let imageProcessor = null;
 
-async function initializeModel() {
-  try {
-    status.value = "正在加载模型...";
-    model = await AutoModel.from_pretrained("briaai/RMBG-1.4", {
-      config: { model_type: "custom" },
-      device: "webgpu",
-    });
-    status.value = "正在加载处理器...";
-    processor = await AutoProcessor.from_pretrained("briaai/RMBG-1.4", {
-      config: {
-        do_normalize: true,
-        do_pad: false,
-        do_rescale: true,
-        do_resize: true,
-        image_mean: [0.5, 0.5, 0.5],
-        feature_extractor_type: "ImageFeatureExtractor",
-        image_std: [1, 1, 1],
-        resample: 2,
-        rescale_factor: 0.00392156862745098,
-        size: { width: 1024, height: 1024 },
-      },
-    });
-    status.value = "准备就绪";
-    isModelLoading.value = false;
-  } catch (e) {
-    error.value = "模型加载失败: " + e.message;
-    status.value = "初始化失败";
-    isModelLoading.value = false;
-  }
+function initializeWorker() {
+  imageProcessor = new Worker(new URL("./workers/imageProcessor.js", import.meta.url), { type: "module" });
+
+  imageProcessor.onmessage = e => {
+    const { type, result, error: workerError } = e.data;
+
+    switch (type) {
+      case "modelLoaded":
+        isModelLoading.value = false;
+        status.value = "准备就绪";
+        break;
+      case "processComplete":
+        const { processedImage, index } = result;
+        if (images.value[index]) {
+          images.value[index].processed = processedImage;
+          images.value[index].status = "completed";
+        }
+        break;
+      case "error":
+        error.value = workerError;
+        status.value = "处理失败";
+        break;
+    }
+  };
+
+  imageProcessor.onerror = err => {
+    error.value = `Worker error: ${err.message}`;
+    status.value = "处理失败";
+  };
+
+  // Initialize the model in worker
+  imageProcessor.postMessage({ type: "init" });
 }
 
-async function handleFileUpload(event) {
-  const files = event.target.files;
+async function handleFiles(files) {
   if (!files.length) return;
 
   try {
     isLoading.value = true;
     error.value = null;
 
-    // Initialize model if needed
-    if (!model || !processor) {
-      status.value = "初始化模型...";
-      await initializeModel();
-    }
-
     // Process each file
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+
+      // Check if file is an image
+      if (!file.type.startsWith("image/")) {
+        error.value = `${file.name} 不是图片文件`;
+        continue;
+      }
+
       status.value = `处理第 ${i + 1}/${files.length} 张图片...`;
 
       // Create image entry
       const imageEntry = {
         original: null,
         processed: null,
+        originalLoaded: false,
         name: file.name,
+        size: formatFileSize(file.size),
+        status: "processing",
       };
+      const currentIndex = images.value.length;
       images.value.push(imageEntry);
+
+      // Set selected index to first image if none selected
+      if (selectedImageIndex.value === null) {
+        selectedImageIndex.value = currentIndex;
+      }
 
       // Display original image
       const reader = new FileReader();
@@ -83,39 +98,123 @@ async function handleFileUpload(event) {
         reader.readAsDataURL(file);
       });
 
-      // Process image
-      const image = await RawImage.fromBlob(file);
-      const { pixel_values } = await processor(image);
-      const { output } = await model({ input: pixel_values });
-
-      // Generate final image
-      const mask = await RawImage.fromTensor(output[0].mul(255).to("uint8")).resize(image.width, image.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(image.toCanvas(), 0, 0);
-      const pixelData = ctx.getImageData(0, 0, image.width, image.height);
-
-      for (let i = 0; i < mask.data.length; ++i) {
-        pixelData.data[4 * i + 3] = mask.data[i];
-      }
-
-      ctx.putImageData(pixelData, 0, 0);
-      imageEntry.processed = canvas.toDataURL();
+      // Process image in worker
+      imageProcessor.postMessage({
+        type: "process",
+        data: {
+          image: file,
+          index: currentIndex,
+        },
+      });
     }
-
-    status.value = "处理完成";
   } catch (e) {
-    error.value = "处理图片失败: " + e.message;
+    error.value = e.message;
     status.value = "处理失败";
   } finally {
     isLoading.value = false;
+    isDragging.value = false;
   }
 }
 
-// Initialize model when component mounts
-initializeModel();
+function handleFileUpload(event) {
+  handleFiles(event.target.files);
+}
+
+function handleDragEnter(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  isDragging.value = true;
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.currentTarget.contains(e.relatedTarget)) {
+    isDragging.value = false;
+  }
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  isDragging.value = false;
+
+  const files = [...e.dataTransfer.files];
+  handleFiles(files);
+}
+
+function handleSliderMove(event) {
+  if (!isSliderDragging.value) return;
+
+  const container = event.currentTarget;
+  const rect = container.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+
+  sliderPosition.value = percentage;
+}
+
+function handleSliderStart() {
+  isSliderDragging.value = true;
+}
+
+function handleSliderEnd() {
+  isSliderDragging.value = false;
+}
+
+// Delete a single image
+function deleteImage(index, event) {
+  event.stopPropagation();
+  images.value = images.value.filter((_, i) => i !== index);
+  if (selectedImageIndex.value === index) {
+    selectedImageIndex.value = images.value.length > 0 ? 0 : null;
+  } else if (selectedImageIndex.value > index) {
+    selectedImageIndex.value--;
+  }
+}
+
+// Clear all images
+function clearAllImages() {
+  images.value = [];
+  selectedImageIndex.value = null;
+}
+
+// Export all processed images
+async function exportAllProcessed() {
+  const processedImages = images.value.filter(img => img.status === "completed" && img.processed);
+
+  if (processedImages.length === 0) {
+    error.value = "没有可导出的已处理图片";
+    return;
+  }
+
+  for (const img of processedImages) {
+    const link = document.createElement("a");
+    link.href = img.processed;
+    link.download = `processed_${img.name}`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    await new Promise(resolve => setTimeout(resolve, 100)); // Small delay between downloads
+  }
+}
+
+// Utility function to format file size
+function formatFileSize(bytes) {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+// Initialize worker when component mounts
+initializeWorker();
 </script>
 
 <template>
@@ -151,71 +250,113 @@ initializeModel();
         <!-- Left Column: Upload and Image List -->
         <div class="w-full lg:w-1/3 space-y-6">
           <!-- Upload Section -->
-          <div class="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-            <label class="block text-gray-700 font-medium mb-3" for="image">选择图片</label>
-            <div class="relative">
-              <input type="file" multiple accept="image/*" @change="handleFileUpload" :disabled="isLoading || isModelLoading" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed" />
+          <div class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow relative cursor-pointer group" @dragenter="handleDragEnter" @dragleave="handleDragLeave" @dragover="handleDragOver" @drop="handleDrop" @click="$refs.fileInput.click()">
+            <input type="file" accept="image/*" multiple class="hidden" @change="handleFileUpload" ref="fileInput" />
+
+            <!-- Drag overlay -->
+            <div v-if="isDragging" class="absolute inset-0 bg-blue-500 bg-opacity-10 border-2 border-blue-500 border-dashed rounded-xl z-10 flex items-center justify-center">
+              <div class="text-blue-500 font-medium">
+                <svg class="mx-auto h-12 w-12 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                释放鼠标上传图片
+              </div>
+            </div>
+
+            <div class="p-6" :class="{ 'pointer-events-none': isDragging }">
+              <div class="space-y-4">
+                <div class="text-center">
+                  <svg class="mx-auto h-12 w-12 text-gray-400 group-hover:text-blue-500 transition-colors" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <div class="mt-4">
+                    <span class="inline-flex items-center px-4 py-2 shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 group-hover:bg-blue-700 transition-colors" :class="{ 'opacity-50 cursor-not-allowed': isModelLoading }">
+                      <svg class="-ml-1 mr-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12" />
+                      </svg>
+                      选择图片
+                    </span>
+                  </div>
+                  <p class="mt-2 text-sm text-gray-500">或将图片拖拽到此处</p>
+                  <p class="mt-1 text-xs text-gray-400">支持 PNG、JPG、JPEG 格式</p>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- Image List -->
-          <div class="bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-            <h3 class="text-gray-700 font-medium mb-4">已上传图片</h3>
-            <div class="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-              <div
-                v-for="(image, index) in images"
-                :key="index"
-                @click="selectedImageIndex = index"
-                class="flex items-center p-3 rounded-lg transition-all cursor-pointer"
-                :class="{
-                  'bg-blue-50 ring-2 ring-blue-500': selectedImageIndex === index,
-                  'hover:bg-gray-50': selectedImageIndex !== index,
-                }">
-                <img :src="image.original" class="w-16 h-16 object-cover rounded-lg" />
-                <div class="ml-4 flex-1">
-                  <p class="text-sm font-medium text-gray-900 truncate">{{ image.name }}</p>
-                  <p class="text-xs text-gray-500 mt-1">
-                    {{ image.processed ? "处理完成" : "处理中..." }}
-                  </p>
+          <div class="bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow">
+            <div class="p-4 border-b border-gray-200">
+              <div class="flex justify-between items-center">
+                <h3 class="text-lg font-medium text-gray-900">图片列表</h3>
+                <div class="space-x-2">
+                  <button @click="exportAllProcessed" class="px-3 py-1 text-sm bg-green-500 text-white rounded hover:bg-green-600 transition-colors" :disabled="!images.length">导出全部</button>
+                  <button @click="clearAllImages" class="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600 transition-colors" :disabled="!images.length">清空</button>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-
-        <!-- Right Column: Selected Image Preview -->
-        <div class="flex-1 bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow">
-          <div v-if="selectedImageIndex !== null && images[selectedImageIndex]" class="space-y-6">
-            <div class="flex items-center justify-between">
-              <h3 class="text-lg font-medium text-gray-900">{{ images[selectedImageIndex].name }}</h3>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div class="space-y-2">
-                <p class="text-sm font-medium text-gray-600">原图</p>
-                <div class="relative aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                  <img :src="images[selectedImageIndex].original" class="w-full h-full object-contain" alt="Original image" />
-                </div>
-              </div>
-              <div class="space-y-2">
-                <p class="text-sm font-medium text-gray-600">处理后</p>
-                <div class="relative aspect-square bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEwAACxMBAJqcGAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAAYdEVYdFRpdGxlAENhbnZhcyBCYWNrZ3JvdW5kTPrL+wAAABd0RVh0QXV0aG9yAFBhYmxvIE1hcmNvcyBKLs3mAP8AAAAsdEVYdERlc2NyaXB0aW9uAEJhY2tncm91bmQgcGF0dGVybiBmb3IgY2FudmFzZXOBBFj6AAAAJ3RFWHRDcmVhdGlvbiBUaW1lAE1vbiBKdW4gMjAgMTY6MDA6NDYgMjAxMZkQAwsAAAATdEVYdFNvZnR3YXJlAEdOT01FIEljb27E/6eKAAAASHRFWHRDb3B5cmlnaHQAQ0MgQXR0cmlidXRpb24tTm9uQ29tbWVyY2lhbC1TaGFyZUFsaWtlIGh0dHA6Ly9jcmVhdGl2ZWNvbW1vbnMub3JnL7fvWYsAAAB6SURBVDiNY/z//z8DJYCJIt3UNYCFgYGBgfFW8hpGBgYGvYu5j+TIMYAFmyQjIyMDAwMDQ8GVvAcgGsUQdAOQAUjNegy7MAxABugGwQwh2gB0gGwIMQagA2RDCBqAC8AMwWsAIQA3BK8BhADYEKwGEANghqAYQA4AAKuXJBAXHHkzAAAAAElFTkSuQmCC')] rounded-lg overflow-hidden">
-                  <img v-if="images[selectedImageIndex].processed" :src="images[selectedImageIndex].processed" class="w-full h-full object-contain" alt="Processed image" />
-                  <div v-else class="absolute inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                    <div class="text-center">
-                      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-                      <p class="text-gray-600">处理中...</p>
+            <div class="divide-y divide-gray-200 max-h-[500px] overflow-y-auto">
+              <div 
+                v-for="(image, index) in images" 
+                :key="index" 
+                @click="!isModelLoading && (selectedImageIndex = index)" 
+                class="p-4 hover:bg-gray-50" 
+                :class="{ 
+                  'cursor-pointer': !isModelLoading,
+                  'cursor-not-allowed': isModelLoading,
+                  'bg-blue-50': selectedImageIndex === index 
+                }"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex justify-between items-center">
+                      <p class="text-sm font-medium text-gray-900 truncate">{{ image.name }}</p>
+                      <button @click="deleteImage(index, $event)" class="p-1 text-gray-400 hover:text-red-500 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div class="mt-1 flex items-center text-xs text-gray-500 space-x-2">
+                      <span>{{ image.size }}</span>
+                      <span>•</span>
+                      <span v-if="image.status === 'processing'" class="inline-flex items-center">
+                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        处理中...
+                      </span>
+                      <span v-else class="inline-flex items-center text-green-600">
+                        <svg class="-ml-1 mr-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                        </svg>
+                        处理完成
+                      </span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-          <div v-else class="h-[600px] flex items-center justify-center">
-            <div class="text-center">
-              <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        </div>
+
+        <!-- Right Column: Image Preview -->
+        <div class="flex-1 bg-white rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow min-h-[600px] flex flex-col">
+          <div v-if="selectedImageIndex !== null && images[selectedImageIndex]" class="h-full flex flex-col">
+            <ImgComparisonSlider :key="selectedImageIndex" v-if="selectedImageIndex !== null && images[selectedImageIndex].processed">
+              <img slot="first" style="width: 100%" :src="images[selectedImageIndex].original" />
+              <img slot="second" style="width: 100%" :src="images[selectedImageIndex].processed" />
+            </ImgComparisonSlider>
+          </div>
+
+          <!-- No Image Selected State -->
+          <div v-else class="h-full flex items-center justify-center">
+            <div class="text-center text-gray-500">
+              <svg class="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <p class="mt-2 text-sm text-gray-500">请选择要查看的图片</p>
+              <p class="mt-2">选择图片以预览</p>
             </div>
           </div>
         </div>
