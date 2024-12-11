@@ -7,10 +7,22 @@ let processingQueue = [];
 
 async function initializeModel() {
   try {
+    self.postMessage({ type: 'loadingProgress', progress: 0, stage: '正在加载模型...' });
+
     model = await AutoModel.from_pretrained("briaai/RMBG-1.4", {
       config: { model_type: "custom" },
       device: "webgpu",
+      progress_callback: (progress) => {
+        console.log('progress', progress);
+        self.postMessage({
+          type: 'loadingProgress',
+          progress: (progress.progress || 0).toFixed(2),
+          stage: '正在加载模型...'
+        });
+      }
     });
+
+    self.postMessage({ type: 'loadingProgress', progress: 50, stage: '正在加载处理器...' });
 
     processor = await AutoProcessor.from_pretrained("briaai/RMBG-1.4", {
       config: {
@@ -25,8 +37,17 @@ async function initializeModel() {
         rescale_factor: 0.00392156862745098,
         size: { width: 1024, height: 1024 },
       },
+      progress_callback: (progress) => {
+        console.log('progress', progress);
+        self.postMessage({
+          type: 'loadingProgress',
+          progress: (progress.progress || 0).toFixed(2),
+          stage: '正在加载处理器...'
+        });
+      }
     });
 
+    self.postMessage({ type: 'loadingProgress', progress: 100, stage: '加载完成' });
     self.postMessage({ type: 'modelLoaded' });
   } catch (error) {
     self.postMessage({

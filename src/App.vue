@@ -2,7 +2,7 @@
 import { ref } from "vue";
 import { env } from "@huggingface/transformers";
 import { ImgComparisonSlider } from "@img-comparison-slider/vue";
-import JSZip from 'jszip';
+import JSZip from "jszip";
 
 env.allowLocalModels = false;
 env.backends.onnx.wasm.proxy = true;
@@ -10,6 +10,8 @@ env.backends.onnx.wasm.proxy = true;
 const isLoading = ref(false);
 const isModelLoading = ref(true);
 const status = ref("初始化中...");
+const loadingProgress = ref(0);
+const loadingStage = ref("");
 const images = ref([]);
 const selectedImageIndex = ref(null);
 const error = ref(null);
@@ -24,6 +26,10 @@ function initializeWorker() {
     const { type, result, error: workerError } = e.data;
 
     switch (type) {
+      case "loadingProgress":
+        loadingProgress.value = e.data.progress;
+        loadingStage.value = e.data.stage;
+        break;
       case "modelLoaded":
         isModelLoading.value = false;
         status.value = "准备就绪";
@@ -217,6 +223,19 @@ initializeWorker();
         <p>🔒 全程本地处理，保护您的隐私安全</p>
         <p>⚡️ 快速批量处理，支持所有常见图片格式</p>
         <p>💫 AI 智能处理，效果清晰自然</p>
+      </div>
+
+      <!-- Loading Progress -->
+      <div v-if="isModelLoading" class="fixed top-4 right-40 z-50">
+        <div class="bg-white rounded-lg shadow-md p-3 min-w-[200px]">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-medium text-gray-600">{{ loadingStage }}</span>
+            <span class="text-xs font-medium text-gray-600">{{ Math.round(loadingProgress) }}%</span>
+          </div>
+          <div class="w-full bg-gray-100 rounded-full h-1.5">
+            <div class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" :style="{ width: loadingProgress + '%' }"></div>
+          </div>
+        </div>
       </div>
 
       <div v-if="error" class="mb-6 mx-auto max-w-md">
