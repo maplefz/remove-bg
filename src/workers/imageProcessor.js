@@ -9,7 +9,7 @@ async function initializeModel() {
   try {
     self.postMessage({ type: 'loadingProgress', progress: 0, stage: '正在加载模型...' });
 
-    model = await AutoModel.from_pretrained("briaai/RMBG-2.0", {
+    model = await AutoModel.from_pretrained("briaai/RMBG-1.4", {
       config: { model_type: "custom" },
       device: "webgpu",
       progress_callback: (progress) => {
@@ -24,7 +24,7 @@ async function initializeModel() {
 
     self.postMessage({ type: 'loadingProgress', progress: 50, stage: '正在加载处理器...' });
 
-    processor = await AutoProcessor.from_pretrained("briaai/RMBG-2.0", {
+    processor = await AutoProcessor.from_pretrained("briaai/RMBG-1.4", {
       config: {
         do_normalize: true,
         do_pad: false,
